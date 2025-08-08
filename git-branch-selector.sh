@@ -1,9 +1,9 @@
 #!/bin/bash
 #
 # Git Branch Selector
-# Version: 1.0.0
+# Version: 1.0.1
 # Author: devopsbyday1
-# Created: 2025-08-07
+# Created: 2025-08-08
 #
 # Description:
 #   A utility script that helps you search for and checkout git branches easily.
@@ -62,6 +62,64 @@ strip_remote_prefix() {
   sed 's|remotes/origin/||' | sort | uniq
 }
 
+# Function to check for uncommitted changes and handle them
+handle_uncommitted_changes() {
+  if ! git diff-index --quiet HEAD --; then
+    warn_msg "You have uncommitted changes in your working directory."
+    echo "Options:"
+    echo "  1. Stash changes (save them for later)"
+    echo "  2. Continue anyway (may fail if there are conflicts)"
+    echo "  3. Abort branch switch"
+    echo -n "Select an option (1-3): "
+    read option
+    
+    case $option in
+      1)
+        info_msg "Stashing changes..."
+        stash_name="git-branch-selector-stash-$(date +%s)"
+        if git stash push -m "$stash_name"; then
+          success_msg "Changes stashed successfully. You can restore them later with 'git stash pop'."
+          return 0
+        else
+          error_exit "Failed to stash changes."
+        fi
+        ;;
+      2)
+        warn_msg "Continuing with uncommitted changes. This may fail if there are conflicts."
+        return 0
+        ;;
+      3)
+        info_msg "Operation aborted by user."
+        exit 0
+        ;;
+      *)
+        error_exit "Invalid option. Operation aborted."
+        ;;
+    esac
+  fi
+  return 0
+}
+
+# Function to safely checkout a branch
+safe_checkout() {
+  local branch="$1"
+  
+  # First try simple checkout
+  if git checkout "$branch" 2>/dev/null; then
+    success_msg "Successfully checked out '$branch'"
+    return 0
+  fi
+  
+  # If that fails, try to checkout and track the remote branch
+  if git checkout --track "origin/$branch" 2>/dev/null; then
+    success_msg "Successfully checked out and tracking remote branch '$branch'"
+    return 0
+  fi
+  
+  # If both methods fail, return error
+  return 1
+}
+
 # Check if we're in a git repository
 if ! git rev-parse --is-inside-work-tree > /dev/null 2>&1; then
   error_exit "Not in a git repository. Please run this script from within a git repository."
@@ -88,6 +146,10 @@ fi
 
 # Step 1 & 2: Checkout master and pull
 info_msg "Checking out master branch and pulling latest changes..."
+
+# Check for uncommitted changes before switching to master
+handle_uncommitted_changes
+
 if ! git checkout master; then
   warn_msg "Failed to checkout master branch. Continuing with current branch."
 fi
@@ -125,16 +187,13 @@ elif [ ${#matching_branches[@]} -eq 1 ]; then
   success_msg "Found one matching branch: $branch"
   info_msg "Checking out $branch..."
   
-  if git checkout "$branch"; then
-    success_msg "Successfully checked out '$branch'"
+  # Check for uncommitted changes before switching
+  handle_uncommitted_changes
+  
+  if safe_checkout "$branch"; then
+    success_msg "Branch checkout complete."
   else
-    # Try to create the branch tracking the remote
-    warn_msg "Direct checkout failed. Trying to create tracking branch..."
-    if git checkout -b "$branch" "origin/$branch"; then
-      success_msg "Successfully created and checked out tracking branch '$branch'"
-    else
-      error_exit "Failed to checkout branch '$branch'. It may not exist locally or remotely."
-    fi
+    error_exit "Failed to checkout branch '$branch'. It may not exist locally or remotely."
   fi
 else
   info_msg "Multiple matching branches found:"
@@ -150,16 +209,13 @@ else
       branch="${matching_branches[$((selection-1))]}"
       info_msg "Checking out $branch..."
       
-      if git checkout "$branch"; then
-        success_msg "Successfully checked out '$branch'"
+      # Check for uncommitted changes before switching
+      handle_uncommitted_changes
+      
+      if safe_checkout "$branch"; then
+        success_msg "Branch checkout complete."
       else
-        # Try to create the branch tracking the remote
-        warn_msg "Direct checkout failed. Trying to create tracking branch..."
-        if git checkout -b "$branch" "origin/$branch"; then
-          success_msg "Successfully created and checked out tracking branch '$branch'"
-        else
-          error_exit "Failed to checkout branch '$branch'. It may not exist locally or remotely."
-        fi
+        error_exit "Failed to checkout branch '$branch'. It may not exist locally or remotely."
       fi
       break
     else
