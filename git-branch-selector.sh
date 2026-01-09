@@ -1,17 +1,19 @@
 #!/bin/bash
 #
 # Git Branch Selector
-# Version: 1.0.1
+# Version: 1.2.0
 # Author: devopsbyday1
 # Created: 2025-08-08
+# Updated: 2026-01-09
 #
 # Description:
 #   A utility script that helps you search for and checkout git branches easily.
 #   It performs the following steps:
-#   1. Checks out master branch and pulls latest changes
-#   2. Searches for branches matching a search term (via grep)
-#   3. If one match is found, checks it out automatically
-#   4. If multiple matches are found, presents a numbered list for selection
+#   1. Fetches latest branches from remote
+#   2. Auto-detects and checks out default branch (main/master) and pulls latest changes
+#   3. Searches for branches matching a search term (case-insensitive grep)
+#   4. If one match is found, checks it out automatically
+#   5. If multiple matches are found, presents a numbered list with current branch marked
 #
 # Usage:
 #   ./git-branch-selector.sh [SEARCH_TERM]
@@ -144,14 +146,34 @@ EOF
   exit 0
 fi
 
-# Step 1 & 2: Checkout master and pull
-info_msg "Checking out master branch and pulling latest changes..."
+# Step 1 & 2: Fetch latest branches and detect default branch
+info_msg "Fetching latest branches from remote..."
+if ! git fetch --prune 2>/dev/null; then
+  warn_msg "Failed to fetch from remote. Searching local branches only."
+fi
 
-# Check for uncommitted changes before switching to master
+# Try to detect the default branch from remote HEAD
+default_branch=$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's@^refs/remotes/origin/@@')
+
+# If detection fails, try common branch names
+if [ -z "$default_branch" ]; then
+  if git show-ref --verify --quiet refs/heads/main; then
+    default_branch="main"
+  elif git show-ref --verify --quiet refs/heads/master; then
+    default_branch="master"
+  else
+    warn_msg "Could not detect default branch (main/master). Continuing with current branch."
+    default_branch=$(git branch --show-current)
+  fi
+fi
+
+info_msg "Checking out $default_branch branch and pulling latest changes..."
+
+# Check for uncommitted changes before switching
 handle_uncommitted_changes
 
-if ! git checkout master; then
-  warn_msg "Failed to checkout master branch. Continuing with current branch."
+if ! git checkout "$default_branch"; then
+  warn_msg "Failed to checkout $default_branch branch. Continuing with current branch."
 fi
 
 if ! git pull; then
@@ -170,10 +192,10 @@ else
   fi
 fi
 
-# Step 4: Search for branches
+# Step 4: Search for branches (case-insensitive)
 info_msg "Searching for branches containing '$search_term'..."
-# Use -E for extended regex and wrap in try/catch
-if ! branch_list=$(git branch -a | grep -E "$search_term" 2>/dev/null); then
+# Use -iE for case-insensitive extended regex
+if ! branch_list=$(git branch -a | grep -iE "$search_term" 2>/dev/null); then
   error_exit "No branches found matching '$search_term'"
 fi
 
@@ -197,8 +219,13 @@ elif [ ${#matching_branches[@]} -eq 1 ]; then
   fi
 else
   info_msg "Multiple matching branches found:"
+  current_branch=$(git branch --show-current)
   for i in "${!matching_branches[@]}"; do
-    echo -e "  ${GREEN}$((i+1))${NC}. ${matching_branches[$i]}"
+    if [ "${matching_branches[$i]}" = "$current_branch" ]; then
+      echo -e "  ${GREEN}$((i+1))${NC}. ${matching_branches[$i]} ${YELLOW}(current)${NC}"
+    else
+      echo -e "  ${GREEN}$((i+1))${NC}. ${matching_branches[$i]}"
+    fi
   done
   
   while true; do
