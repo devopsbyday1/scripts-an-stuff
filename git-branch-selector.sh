@@ -1,10 +1,10 @@
 #!/bin/bash
 #
 # Git Branch Selector
-# Version: 1.2.0
+# Version: 1.3.0
 # Author: devopsbyday1
 # Created: 2025-08-08
-# Updated: 2026-01-09
+# Updated: 2026-02-25
 #
 # Description:
 #   A utility script that helps you search for and checkout git branches easily.
@@ -68,36 +68,51 @@ strip_remote_prefix() {
 handle_uncommitted_changes() {
   if ! git diff-index --quiet HEAD --; then
     warn_msg "You have uncommitted changes in your working directory."
-    echo "Options:"
-    echo "  1. Stash changes (save them for later)"
-    echo "  2. Continue anyway (may fail if there are conflicts)"
-    echo "  3. Abort branch switch"
-    echo -n "Select an option (1-3): "
-    read option
-    
-    case $option in
-      1)
-        info_msg "Stashing changes..."
-        stash_name="git-branch-selector-stash-$(date +%s)"
-        if git stash push -m "$stash_name"; then
-          success_msg "Changes stashed successfully. You can restore them later with 'git stash pop'."
+    echo ""
+    git status --short
+    echo ""
+
+    while true; do
+      echo "Options:"
+      echo "  1. Stash changes (save them for later)"
+      echo "  2. Continue anyway (may fail if there are conflicts)"
+      echo "  3. Show diff"
+      echo "  4. Abort branch switch"
+      echo -n "Select an option (1-4): "
+      read option
+
+      case $option in
+        1)
+          default_stash_name="git-branch-selector-stash-$(date +%s)"
+          echo -n "Enter a stash name (leave blank for default: $default_stash_name): "
+          read custom_stash_name
+          stash_name="${custom_stash_name:-$default_stash_name}"
+          info_msg "Stashing changes as '$stash_name'..."
+          if git stash push -m "$stash_name"; then
+            success_msg "Changes stashed successfully. You can restore them later with 'git stash pop'."
+            return 0
+          else
+            error_exit "Failed to stash changes."
+          fi
+          ;;
+        2)
+          warn_msg "Continuing with uncommitted changes. This may fail if there are conflicts."
           return 0
-        else
-          error_exit "Failed to stash changes."
-        fi
-        ;;
-      2)
-        warn_msg "Continuing with uncommitted changes. This may fail if there are conflicts."
-        return 0
-        ;;
-      3)
-        info_msg "Operation aborted by user."
-        exit 0
-        ;;
-      *)
-        error_exit "Invalid option. Operation aborted."
-        ;;
-    esac
+          ;;
+        3)
+          echo ""
+          git diff HEAD
+          echo ""
+          ;;
+        4)
+          info_msg "Operation aborted by user."
+          exit 0
+          ;;
+        *)
+          warn_msg "Invalid option. Please try again."
+          ;;
+      esac
+    done
   fi
   return 0
 }
